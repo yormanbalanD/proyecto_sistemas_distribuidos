@@ -10,7 +10,7 @@ import random
 pygame.init()
 
 # Dimensiones de la ventana
-WIDTH, HEIGHT = 1000, 600
+WIDTH, HEIGHT = 1200, 600
 SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Simulador de Puente de Coches")
 
@@ -23,6 +23,7 @@ DARK_GRAY = (100, 100, 100)
 BLUE = (0, 0, 255)
 RED = (255, 0, 0)
 GREEN = (0, 200, 0)
+PURPUL= (128, 0, 128)
 ACTIVE_COLOR = (150, 150, 255) # Color para InputBox activo
 SELECTED_DIRECTION_COLOR = (0, 200, 0) # Verde para la dirección seleccionada
 
@@ -165,6 +166,8 @@ class Button:
         self.base_color = base_color
         self.text_color = WHITE
         self.hover_color = (min(255, base_color[0] + 30), min(255, base_color[1] + 30), min(255, base_color[2] + 30))
+        #self.hover_color = (max(0, base_color[0] - 30), max(0, base_color[1] - 30), max(0, base_color[2] - 30)) # Más oscuro al pasar el cursor
+        #self.click_color = (max(0, base_color[0] - 60), max(0, base_color[1] - 60), max(0, base_color[2] - 60)) # Aún más oscuro al presionar
         self.current_color = self.base_color
         self.enabled = True
 
@@ -467,11 +470,11 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
 
     button_width = 150
     button_height = 40
-    input_width = 300
+    input_width = 200
     input_height = 40
-    
-    east_button = Button(WIDTH // 2 + 30, 150, button_width, button_height, DIRECTION_LABELS[DIRECTION_EAST_WEST], lambda: set_direction(DIRECTION_EAST_WEST), BLUE)
-    west_button = Button(WIDTH // 2 + 30 + button_width + 10, 150, button_width, button_height, DIRECTION_LABELS[DIRECTION_WEST_EAST], lambda: set_direction(DIRECTION_WEST_EAST), BLUE)
+
+    east_button = Button(WIDTH // 2 + 60, 150, button_width, button_height, DIRECTION_LABELS[DIRECTION_EAST_WEST], lambda: set_direction(DIRECTION_EAST_WEST), BLUE)
+    west_button = Button(WIDTH // 2 + 80 + button_width + 10, 150, button_width, button_height, DIRECTION_LABELS[DIRECTION_WEST_EAST], lambda: set_direction(DIRECTION_WEST_EAST), BLUE)
     set_direction(direction_selected) # Inicializa el color del botón de dirección seleccionada
 
     velocity_input_box = InputBox(WIDTH // 2 + 30, 210, input_width, input_height, text=str(initial_velocity) if initial_velocity is not None else '10', is_numeric=True)
@@ -485,8 +488,8 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
     change_properties_button = Button(WIDTH // 2 + 30, 350, input_width + 10 + button_width, 50, "Cambiar Propiedades", 
                                       lambda: change_properties_action(velocity_input_box, tiempo_espera_input_box), GREEN)
     
-    terminate_connection_button = Button(WIDTH - 180, 20, 160, 40, "Terminar Conexión", end_connection_action, RED)
-    simulate_drop_button = Button(WIDTH - 180, 70, 160, 40, "Simular Caída", simulate_disconnect_action, DARK_GRAY)
+    terminate_connection_button = Button(WIDTH - 190, 20, 190, 40, "Terminar Conexión", end_connection_action, RED)
+    simulate_drop_button = Button(WIDTH - 190, 70, 190, 40, "Simular Caída", simulate_disconnect_action, PURPUL)
 
     # Deshabilitar botones de control inicialmente si la conexión es automática
     if initial_velocity is not None and initial_cooldown is not None and initial_direction is not None:
