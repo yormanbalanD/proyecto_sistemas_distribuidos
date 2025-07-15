@@ -23,7 +23,7 @@ DARK_GRAY = (100, 100, 100)
 BLUE = (0, 0, 255)
 RED = (255, 0, 0)
 GREEN = (0, 200, 0)
-PURPUL= (128, 0, 128)
+PURPUL = (128, 0, 128)
 ACTIVE_COLOR = (150, 150, 255) # Color para InputBox activo
 SELECTED_DIRECTION_COLOR = (0, 200, 0) # Verde para la dirección seleccionada
 
@@ -40,13 +40,13 @@ MSG_CAR_STATUS = "CAR_STATUS"
 MSG_CAR_END = "CAR_END"
 MSG_CAR_START = "CAR_START"
 MSG_CONNECTED = "CONNECTED"
-MSG_REQUEST_BRIDGE_ACCESS = "REQUEST_BRIDGE_ACCESS"
+MSG_REQUEST_BRIDGE_ACCESS = "REQUEST_BRIDGE_ACCESS" # No usado directamente en el cliente actual, pero útil para saber
 
 MSG_CHANGE_CAR_PROPERTIES = "CHANGE_CAR_PROPERTIES"
-MSG_CHANGE_CAR_PROPERTIES_ACK = "CHANGE_CAR_PROPERTIES_ACK"
+MSG_CHANGE_CAR_PROPERTIES_ACK = "CHANGE_CHANGE_CAR_PROPERTIES_ACK" # Asegúrate que esto coincida con tu backend Go
 
 MSG_END_CONNECTION = "END_CONNECTION"
-MSG_RECONNECT = "RECONNECT"
+MSG_RECONNECT = "RECONNECT" # No usado directamente en el cliente actual, es más bien un estado interno
 
 DIRECTION_NONE = "NONE"
 DIRECTION_EAST_WEST = "EAST_TO_WEST"
@@ -62,15 +62,15 @@ client_socket = None
 network_thread = None
 is_connected = False
 assigned_client_id = "" # Ahora se inicializa vacío, se asignará al conectar/reconectar
-all_cars_status = {}
-car_status_lock = threading.Lock()
+all_cars_status = {} # Diccionario para almacenar el estado de TODOS los coches
+car_status_lock = threading.Lock() # Para proteger all_cars_status de accesos concurrentes
 
 client_colors = {}
 PREDEFINED_COLORS = [
     (255, 99, 71), (60, 179, 113), (255, 215, 0), (138, 43, 226), (0, 191, 255),
     (255, 165, 0), (218, 112, 214), (0, 128, 0), (128, 0, 0), (70, 130, 180)
 ]
-color_index = 0
+color_index = 0 # Reiniciamos el índice de color para que los colores se reutilicen de forma circular
 
 # Estado de reconexión
 reconnect_attempts = 0
@@ -88,11 +88,9 @@ DIRECTION_LABELS = {
 def get_unique_color(client_id):
     global color_index
     if client_id not in client_colors:
-        if color_index < len(PREDEFINED_COLORS):
-            client_colors[client_id] = PREDEFINED_COLORS[color_index]
-            color_index += 1
-        else:
-            client_colors[client_id] = (random.randint(50, 200), random.randint(50, 200), random.randint(50, 200))
+        # Asigna un color de la lista predefinida o uno aleatorio si se acaban
+        client_colors[client_id] = PREDEFINED_COLORS[color_index % len(PREDEFINED_COLORS)]
+        color_index += 1
     return client_colors[client_id]
 
 # --- Clases de Elementos de UI ---
@@ -166,8 +164,6 @@ class Button:
         self.base_color = base_color
         self.text_color = WHITE
         self.hover_color = (min(255, base_color[0] + 30), min(255, base_color[1] + 30), min(255, base_color[2] + 30))
-        #self.hover_color = (max(0, base_color[0] - 30), max(0, base_color[1] - 30), max(0, base_color[2] - 30)) # Más oscuro al pasar el cursor
-        #self.click_color = (max(0, base_color[0] - 60), max(0, base_color[1] - 60), max(0, base_color[2] - 60)) # Aún más oscuro al presionar
         self.current_color = self.base_color
         self.enabled = True
 
@@ -239,15 +235,13 @@ def network_listener(sock):
     
     while is_connected:
         try:
-            sock.settimeout(1.0) 
+            sock.settimeout(1.0) # Pequeño timeout para no bloquear indefinidamente
             data = sock.recv(4096).decode('utf-8')
             
             if not data:
                 print("[*] Servidor desconectado o envió datos vacíos. Iniciando proceso de reconexión.")
                 is_connected = False # Marcar como desconectado
-                # No romper el bucle aquí, dejar que el bucle principal de Pygame maneje la desconexión
-                # y posiblemente la reconexión.
-                break 
+                break # Salir del bucle del hilo, el bucle principal de Pygame manejará la reconexión
             
             # Resetear intentos de reconexión y timer si recibimos datos
             reconnect_attempts = 0
@@ -268,6 +262,7 @@ def network_listener(sock):
                         if msg_type == MSG_CAR_STATUS:
                             car_id = message.get("clientId")
                             if car_id:
+                                # Si el coche no existe o ya existe, actualizar/crear
                                 all_cars_status[car_id] = {
                                     "clientId": car_id,
                                     "position": message.get("position", 0),
@@ -275,26 +270,56 @@ def network_listener(sock):
                                     "isCrossing": message.get("isCrossing", False),
                                     "state": message.get("state", "NONE")
                                 }
-                                get_unique_color(car_id) 
+                                get_unique_color(car_id) # Asegurar que tenga un color asignado
 
                         elif msg_type == MSG_CONNECTED:
                             assigned_client_id = message.get("clientId", "") # Capturar clientId del mensaje CONNECTED
                             print(f"[NET] Mensaje del Servidor: {msg_type} - Conexión establecida. ClientID: {assigned_client_id}")
                             
                         elif msg_type == MSG_CAR_START:
-                            print(f"[NET] Mensaje del Servidor: {msg_type} - Coche comenzando a cruzar el puente. ClientID: {message.get('clientId')}")
+                            started_client_id = message.get("clientId")
+                            print(f"[NET] Mensaje del Servidor: {msg_type} - Coche comenzando a cruzar el puente. ClientID: {started_client_id}")
+                            
+                            # --- Lógica de limpieza: eliminar coches que NO son el nuestro ---
+                            # Esto asegura que la vista siempre esté limpia para el coche activo.
+                            # Si tu backend envía un MSG_CAR_START por cada coche que inicia,
+                            # esto limpiará los coches que no sean el 'assigned_client_id'.
+                            cars_to_keep = {}
+                            colors_to_keep = {}
+                            
+                            if assigned_client_id in all_cars_status:
+                                cars_to_keep[assigned_client_id] = all_cars_status[assigned_client_id]
+                                colors_to_keep[assigned_client_id] = client_colors.get(assigned_client_id)
+
+                            all_cars_status.clear()
+                            client_colors.clear()
+                            global color_index
+                            color_index = 0 # Resetear índice de colores para nuevos coches
+
+                            all_cars_status.update(cars_to_keep)
+                            client_colors.update(colors_to_keep)
+                            if assigned_client_id in all_cars_status:
+                                get_unique_color(assigned_client_id) # Reasignar color a nuestro propio coche si se mantuvo
+                            
+                            # El coche que acaba de empezar a cruzar se añadirá/actualizará con su próximo CAR_STATUS
+
                         elif msg_type == MSG_CAR_END:
-                            print(f"[NET] Mensaje del Servidor: {msg_type} - Coche terminó de cruzar el puente. ClientID: {message.get('clientId')}")
+                            client_id_ended = message.get("clientId")
+                            print(f"[NET] Mensaje del Servidor: {msg_type} - Coche {client_id_ended} terminó de cruzar el puente.")
+                            if client_id_ended in all_cars_status:
+                                del all_cars_status[client_id_ended] # ¡Importante! Eliminar el coche del estado
+                            if client_id_ended in client_colors:
+                                del client_colors[client_id_ended] # Eliminar su color asignado
+
                         elif msg_type == MSG_CHANGE_CAR_PROPERTIES_ACK:
                             print(f"[NET] Mensaje del Servidor: {msg_type} - Cambio de propiedades del coche confirmado.")
                         else:
-                            if msg_type not in [MSG_CAR_STATUS, MSG_CONNECTED, MSG_CAR_START, MSG_CAR_END, MSG_CHANGE_CAR_PROPERTIES_ACK]:
-                                print(f"[NET] Mensaje desconocido recibido: {message}")
+                            print(f"[NET] Mensaje desconocido recibido: {message}")
                             
                 except json.JSONDecodeError as e:
                     print(f"[NET][!] Error al decodificar JSON: {e}. Datos: '{line}'")
                 except socket.timeout:
-                    pass
+                    pass # Se espera si no hay datos
                 except Exception as e:
                     print(f"[NET][!] Error al procesar el mensaje: {e}")
 
@@ -303,7 +328,7 @@ def network_listener(sock):
             is_connected = False
             break
         except socket.timeout:
-            pass 
+            pass # Se espera si no hay datos del socket
         except Exception as e:
             print(f"[!] Error general de red: {e}. Iniciando proceso de reconexión.")
             is_connected = False
@@ -360,16 +385,14 @@ def attempt_connection(velocity_input_box, tiempo_espera_input_box, direction_se
             print(f"[*] Datos de reconexión enviados para ClientID: {assigned_client_id}. Dir={direction_selected}, Vel={velocity}, Cooldown={tiempo_espera}")
 
         # Iniciar o reiniciar el hilo de escucha de red DESPUÉS de conectar el socket
-        # Si el hilo anterior aún está vivo, asegurar su terminación o gestionarlo.
-        # En este caso, el `network_listener` se rompe si `is_connected` se vuelve `False`,
-        # por lo que un nuevo hilo es lo más seguro.
         if network_thread and network_thread.is_alive():
-            # Considerar una forma más robusta de detener el hilo antiguo si es necesario.
-            # Por simplicidad, se asumirá que terminará pronto tras cambiar is_connected a False.
-            pass
+            print("[*] Esperando a que el hilo de red anterior termine...")
+            network_thread.join(timeout=1.0) # Unirse con un timeout para evitar bloqueo
+            if network_thread.is_alive():
+                print("[!] Hilo de red anterior no terminó a tiempo.")
         
         network_thread = threading.Thread(target=network_listener, args=(client_socket,))
-        network_thread.daemon = True
+        network_thread.daemon = True # Esto permite que el programa principal se cierre incluso si el hilo está corriendo
         network_thread.start()
 
         reconnect_attempts = 0 # Reiniciar intentos de reconexión al conectar exitosamente
@@ -379,6 +402,7 @@ def attempt_connection(velocity_input_box, tiempo_espera_input_box, direction_se
     except ValueError:
         if not is_reconnecting:
             print("[!] Entrada inválida: La velocidad y el tiempo de espera deben ser enteros válidos.")
+        is_connected = False # Asegurarse de que si hay un ValueError, se setee a False
         return False
     except ConnectionRefusedError:
         if not is_reconnecting:
@@ -395,6 +419,11 @@ def connect_to_server_action(velocity_input_box, tiempo_espera_input_box, direct
     """Acción manual de conexión."""
     global assigned_client_id
     assigned_client_id = "" # Asegurarse de que sea un nuevo cliente al conectar manualmente
+    with car_status_lock: # Limpiar coches existentes al conectar como nuevo cliente
+        all_cars_status.clear()
+        client_colors.clear()
+        global color_index
+        color_index = 0
     attempt_connection(velocity_input_box, tiempo_espera_input_box, direction, is_reconnecting=False)
 
 def change_properties_action(velocity_input_box, tiempo_espera_input_box):
@@ -431,11 +460,16 @@ def end_connection_action():
     else:
         print("[!] Fallo al enviar mensaje END_CONNECTION, forzando cierre.")
     
-    is_connected = False
+    is_connected = False # Indicar que la conexión se está terminando
     if client_socket:
         client_socket.close()
         client_socket = None
     assigned_client_id = "" # Resetear el ID del cliente al terminar conexión
+    with car_status_lock: # Limpiar todos los coches al terminar conexión
+        all_cars_status.clear()
+        client_colors.clear()
+        global color_index
+        color_index = 0
     print("[*] Conexión del cliente finalizada.")
 
 def simulate_disconnect_action():
@@ -445,7 +479,7 @@ def simulate_disconnect_action():
         return
     
     print("[!] Simulando caída de internet (desconexión abrupta)...")
-    is_connected = False
+    is_connected = False # Esto hará que el network_listener se rompa y el main loop intente reconectar
     if client_socket:
         client_socket.close()
         client_socket = None
@@ -486,7 +520,7 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
                                  lambda: connect_to_server_action(velocity_input_box, tiempo_espera_input_box, direction_selected))
 
     change_properties_button = Button(WIDTH // 2 + 30, 350, input_width + 10 + button_width, 50, "Cambiar Propiedades", 
-                                      lambda: change_properties_action(velocity_input_box, tiempo_espera_input_box), GREEN)
+                                     lambda: change_properties_action(velocity_input_box, tiempo_espera_input_box), GREEN)
     
     terminate_connection_button = Button(WIDTH - 190, 20, 190, 40, "Terminar Conexión", end_connection_action, RED)
     simulate_drop_button = Button(WIDTH - 190, 70, 190, 40, "Simular Caída", simulate_disconnect_action, PURPUL)
@@ -535,14 +569,15 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
             
             # Manejo de clics de ratón para input boxes y botones
             if event.type == pygame.MOUSEBUTTONDOWN:
-                if not is_connected: # Solo si no está conectado, para los botones de entrada
+                # Botones de dirección y 'Entrar al Puente' solo si no estamos conectados
+                if not is_connected:
                     enter_bridge_button.handle_event(event)
                     east_button.handle_event(event)
                     west_button.handle_event(event)
-                else: # Si está conectado, para los botones de control de propiedades/conexión
-                    change_properties_button.handle_event(event)
-                    terminate_connection_button.handle_event(event)
-                    simulate_drop_button.handle_event(event)
+                # Botones de control de propiedades y conexión siempre si están habilitados
+                change_properties_button.handle_event(event)
+                terminate_connection_button.handle_event(event)
+                simulate_drop_button.handle_event(event)
 
                 # Siempre manejar las cajas de texto, sin importar el estado de conexión
                 for box in input_boxes:
@@ -557,23 +592,34 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
                 box.handle_event(event)
 
         # --- Lógica de reconexión automática ---
-        if not is_connected and assigned_client_id != "" and reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
-            reconnect_timer += dt
-            if reconnect_timer >= RECONNECT_DELAY:
-                print(f"[*] Intentando reconexión ({reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})...")
-                connection_status_message = f"Intentando reconectar ({reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})..."
-                if attempt_connection(velocity_input_box, tiempo_espera_input_box, direction_selected, is_reconnecting=True):
-                    print("[*] ¡Reconexión exitosa!")
-                    connection_status_message = "Conectado."
-                else:
-                    reconnect_attempts += 1
-                    reconnect_timer = 0 # Reiniciar el timer para el próximo intento
-                    if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-                        print("[!] Máximos intentos de reconexión alcanzados. Desconexión permanente.")
-                        connection_status_message = "Desconectado. Reconexión fallida."
-                        assigned_client_id = "" # Olvidar el ID si la reconexión falla permanentemente
-        elif not is_connected and assigned_client_id == "":
-            connection_status_message = "Desconectado."
+        if not is_connected:
+            if assigned_client_id != "" and reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                reconnect_timer += dt
+                if reconnect_timer >= RECONNECT_DELAY:
+                    print(f"[*] Intentando reconexión ({reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})...")
+                    connection_status_message = f"Intentando reconectar ({reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})..."
+                    if attempt_connection(velocity_input_box, tiempo_espera_input_box, direction_selected, is_reconnecting=True):
+                        print("[*] ¡Reconexión exitosa!")
+                        connection_status_message = "Conectado."
+                    else:
+                        reconnect_attempts += 1
+                        reconnect_timer = 0 # Reiniciar el timer para el próximo intento
+                        if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                            print("[!] Máximos intentos de reconexión alcanzados. Desconexión permanente.")
+                            connection_status_message = "Desconectado. Reconexión fallida."
+                            assigned_client_id = "" # Olvidar el ID si la reconexión falla permanentemente
+                            with car_status_lock: # Limpiar todos los coches si la reconexión falla permanentemente
+                                all_cars_status.clear()
+                                client_colors.clear()
+                                color_index = 0
+            elif assigned_client_id == "": # Si no hay ID de cliente asignado (nueva conexión o reconexión fallida)
+                connection_status_message = "Desconectado."
+                # Limpiar la pantalla de coches si no hay un ID de cliente asignado (nueva sesión)
+                with car_status_lock:
+                    all_cars_status.clear()
+                    client_colors.clear()
+                    color_index = 0
+
         elif is_connected:
             connection_status_message = "Conectado."
 
@@ -606,12 +652,6 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
             terminate_connection_button.set_enabled(False)
             simulate_drop_button.set_enabled(False)
             
-            if assigned_client_id == "": # Solo limpiar si es una nueva conexión o reconexión fallida
-                with car_status_lock:
-                    all_cars_status.clear()
-                    client_colors.clear()
-                    color_index = 0
-
 
         # --- Dibujo ---
         SCREEN.fill(LIGHT_GRAY)
@@ -632,12 +672,40 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
         active_crossing_car = None
 
         with car_status_lock:
-            for car_id, car_data in all_cars_status.items():
+            # Crea una copia para iterar y evitar errores si el diccionario cambia durante el bucle
+            # Es importante copiar el diccionario DE all_cars_status antes de la iteración
+            current_cars_status = list(all_cars_status.values()) 
+            
+            # Dibujar primero los coches que no están cruzando, para que los que cruzan estén encima
+            for car_data in current_cars_status:
+                car_id = car_data["clientId"]
+                car_state = car_data["state"]
+                car_color = get_unique_color(car_id) # Obtener el color del coche
+
+                # Para coches en estado WAITING o COOLDOWN, puedes dibujarlos fuera del puente
+                if car_state == CAR_STATE_WAITING:
+                    if car_data["direction"] == DIRECTION_WEST_EAST:
+                        pygame.draw.rect(SCREEN, car_color, (bridge_start_x - car_width - 10, bridge_y + 5, car_width, 30))
+                    elif car_data["direction"] == DIRECTION_EAST_WEST:
+                        pygame.draw.rect(SCREEN, car_color, (bridge_end_x + 10, bridge_y + 5, car_width, 30))
+                
+                elif car_state == CAR_STATE_COOLDOWN:
+                    # Si el backend sigue enviando COOLDOWN después de terminar, dibújalos.
+                    # Si el coche se elimina con MSG_CAR_END, esta sección no se ejecutará para él.
+                    if car_data["direction"] == DIRECTION_WEST_EAST:
+                        pygame.draw.rect(SCREEN, car_color, (bridge_end_x + 10, bridge_y + 5, car_width, 30))
+                    elif car_data["direction"] == DIRECTION_EAST_WEST:
+                        pygame.draw.rect(SCREEN, car_color, (bridge_start_x - car_width - 10, bridge_y + 5, car_width, 30))
+
+
+            # Ahora dibujar los coches que están cruzando para que queden encima
+            for car_data in current_cars_status:
+                car_id = car_data["clientId"]
                 car_pos_logical = car_data["position"]
                 car_direction = car_data["direction"]
                 car_state = car_data["state"]
-                car_color = get_unique_color(car_id)
-
+                car_color = get_unique_color(car_id) # Obtener el color del coche
+                
                 if car_state == CAR_STATE_CROSSING:
                     car_draw_y = bridge_y + 5
 
@@ -651,11 +719,14 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
                     
                     pygame.draw.rect(SCREEN, car_color, (car_draw_x, car_draw_y, car_width, 30))
                     
-                    active_crossing_car = car_data # Esto solo tomará el último coche en la iteración si hay varios cruzando
-                    pygame.draw.rect(SCREEN, BLACK, (car_draw_x, car_draw_y, car_width, 30), 2) # Borde negro para el coche activo
+                    # Dibujar borde negro si es el coche actualmente cruzando
+                    pygame.draw.rect(SCREEN, BLACK, (car_draw_x, car_draw_y, car_width, 30), 2)
+                    
+                    # Actualizar active_crossing_car si este coche está cruzando
+                    active_crossing_car = car_data 
 
 
-        # Mostrar información del coche que está cruzando
+        # Mostrar información del coche que está cruzando (o el último que cruzó/está cruzando)
         current_car_info_y = 50
         if active_crossing_car and active_crossing_car['state'] == CAR_STATE_CROSSING:
             crossing_car_text1 = HIGHLIGHT_FONT.render(f"Coche Cruzando: {active_crossing_car['clientId']}", True, BLACK)
@@ -709,7 +780,7 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
         pygame.display.flip()
         clock.tick(60)
 
-    # Limpieza
+    # Limpieza final antes de salir
     if client_socket:
         print("[*] Cerrando socket del cliente.")
         try:
@@ -721,39 +792,31 @@ def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=Non
     
     if network_thread and network_thread.is_alive():
         print("[*] Esperando a que el hilo de red finalice...")
-        # Darle tiempo al hilo para terminar. Un timeout es importante para no bloquear indefinidamente.
-        network_thread.join(timeout=1.0) 
+        # Unirse con un timeout para evitar bloquear indefinidamente.
+        network_thread.join(timeout=1.0)
         if network_thread.is_alive():
-            print("[!] El hilo de red no terminó limpiamente.")
-
+            print("[!] El hilo de red no terminó a tiempo al cerrar.")
+    
     pygame.quit()
     sys.exit()
 
+# --- Función principal de ejecución ---
 if __name__ == "__main__":
-    initial_vel = None
-    initial_cooldown = None
-    initial_dir = None
+    initial_velocity_arg = None
+    initial_cooldown_arg = None
+    initial_direction_arg = None
 
-    # sys.argv[0] es el nombre del script
-    # Esperamos 3 argumentos adicionales: velocidad, tiempo_de_espera, direccion
-    if len(sys.argv) == 4:
+    if len(sys.argv) > 3:
         try:
-            initial_vel = int(sys.argv[1])
-            initial_cooldown = int(sys.argv[2])
-            initial_dir_str = sys.argv[3].upper() # Convertir a mayúsculas para comparar
-
-            if initial_dir_str == "EAST_TO_WEST":
-                initial_dir = DIRECTION_EAST_WEST
-            elif initial_dir_str == "WEST_TO_EAST":
-                initial_dir = DIRECTION_WEST_EAST
-            else:
-                raise ValueError("Dirección inválida. Use 'EAST_TO_WEST' o 'WEST_TO_EAST'.")
-
-            print(f"[*] Parámetros de inicio por línea de comandos: Velocidad={initial_vel}, TiempoEspera={initial_cooldown}, Dirección={initial_dir}")
-        except ValueError as e:
-            print(f"[!] Error en los argumentos de línea de comandos: {e}")
-            print("Uso: python cliente.py <velocidad> <tiempo_espera> <direccion>")
-            print("Ejemplo: python cliente.py 15 7 EAST_TO_WEST")
-            sys.exit(1) # Salir si hay un error en los argumentos
-
-    run_game(initial_vel, initial_cooldown, initial_dir)
+            initial_velocity_arg = int(sys.argv[1])
+            initial_cooldown_arg = int(sys.argv[2])
+            initial_direction_arg = sys.argv[3]
+            if initial_direction_arg not in [DIRECTION_EAST_WEST, DIRECTION_WEST_EAST]:
+                print(f"Error: Dirección inválida. Use '{DIRECTION_EAST_WEST}' o '{DIRECTION_WEST_EAST}'.")
+                sys.exit(1)
+        except ValueError:
+            print("Uso: python client_pygame.py [velocidad_inicial] [tiempo_espera_inicial] [direccion_inicial]")
+            print("Los argumentos deben ser números enteros y una dirección válida.")
+            sys.exit(1)
+    
+    run_game(initial_velocity_arg, initial_cooldown_arg, initial_direction_arg)
