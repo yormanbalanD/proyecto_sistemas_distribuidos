@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -552,6 +554,7 @@ func main() {
 
 	println("Iniciando el manejo del puente...")
 	go manejoDelPuente()
+	go crearClientesAleatorios(2)
 
 	println("Iniciando la conexión con los clientes...")
 	for {
@@ -569,5 +572,49 @@ func main() {
 		}
 
 		go handleConnection(car)
+	}
+}
+
+func crearClientesAleatorios(minNumClientes int) {
+	time.Sleep(time.Second * 1)
+
+	rand.Seed(time.Now().UnixNano())
+
+	// Se generara entre min a (min + 10) clientes de forma aleatoria
+	numeroDeClientes := rand.Intn(10) + minNumClientes
+
+	time.Sleep(time.Second * 5)
+	fmt.Printf("Generando %d clientes...\n", numeroDeClientes)
+
+	for i := 0; i < numeroDeClientes; i++ {
+		var cmd *exec.Cmd
+
+		velocidadInicial := rand.Intn(40) + 20
+		tiempoDeEsperaInicial := rand.Intn(10) + 2
+		direccion := rand.Intn(2)
+
+		if velocidadInicial < 0 || tiempoDeEsperaInicial < 0 || direccion < 0 {
+			println("Error al generar cliente: Velocidad, tiempo de espera o dirección no válida")
+			continue
+		}
+
+		var dir string
+
+		if direccion == 0 {
+			dir = DIRECTION_EAST_WEST
+		} else {
+			dir = DIRECTION_WEST_EAST
+		}
+
+		println("python client.py " + strconv.Itoa(velocidadInicial) + " " + strconv.Itoa(tiempoDeEsperaInicial) + " " + dir)
+
+		cmd = exec.Command("python", "client.py", strconv.Itoa(velocidadInicial), strconv.Itoa(tiempoDeEsperaInicial), dir)
+		err := cmd.Start()
+		if err != nil {
+			println("Error al iniciar cliente:", err)
+			panic(err)
+		}
+
+		time.Sleep(time.Millisecond * 100)
 	}
 }

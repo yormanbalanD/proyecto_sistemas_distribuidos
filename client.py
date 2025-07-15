@@ -37,15 +37,15 @@ PORT = 12345
 
 MSG_CAR_STATUS = "CAR_STATUS"
 MSG_CAR_END = "CAR_END"
-MSG_CAR_START = "CAR_START" # Revertido a CAR_START, asumiendo que el Go backend lo usa así
+MSG_CAR_START = "CAR_START"
 MSG_CONNECTED = "CONNECTED"
-MSG_REQUEST_BRIDGE_ACCESS = "REQUEST_BRIDGE_ACCESS" # No usado en frontend pero lo mantengo por si acaso
+MSG_REQUEST_BRIDGE_ACCESS = "REQUEST_BRIDGE_ACCESS"
 
 MSG_CHANGE_CAR_PROPERTIES = "CHANGE_CAR_PROPERTIES"
 MSG_CHANGE_CAR_PROPERTIES_ACK = "CHANGE_CAR_PROPERTIES_ACK"
 
 MSG_END_CONNECTION = "END_CONNECTION"
-MSG_RECONNECT = "RECONNECT" # No es un mensaje explícito de reconexión, el backend usa el ClientID en INITIAL_CLIENT_DATA
+MSG_RECONNECT = "RECONNECT"
 
 DIRECTION_NONE = "NONE"
 DIRECTION_EAST_WEST = "EAST_TO_WEST"
@@ -61,8 +61,8 @@ client_socket = None
 network_thread = None
 is_connected = False
 assigned_client_id = "" # Ahora se inicializa vacío, se asignará al conectar/reconectar
-all_cars_status = {} 
-car_status_lock = threading.Lock() 
+all_cars_status = {}
+car_status_lock = threading.Lock()
 
 client_colors = {}
 PREDEFINED_COLORS = [
@@ -112,6 +112,10 @@ class InputBox:
             return None
 
         if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.rect.collidepoint(event.pos):
+                self.active = True
+            else:
+                self.active = False
             self.color = ACTIVE_COLOR if self.active else DARK_GRAY
         
         if event.type == pygame.KEYDOWN:
@@ -314,7 +318,7 @@ def attempt_connection(velocity_input_box, tiempo_espera_input_box, direction_se
 
     if is_connected:
         print("Ya conectado.")
-        return
+        return True # Ya conectado, no hay necesidad de intentar de nuevo
 
     try:
         velocity_text = velocity_input_box.get_text()
@@ -353,11 +357,13 @@ def attempt_connection(velocity_input_box, tiempo_espera_input_box, direction_se
             print(f"[*] Datos de reconexión enviados para ClientID: {assigned_client_id}. Dir={direction_selected}, Vel={velocity}, Cooldown={tiempo_espera}")
 
         # Iniciar o reiniciar el hilo de escucha de red DESPUÉS de conectar el socket
+        # Si el hilo anterior aún está vivo, asegurar su terminación o gestionarlo.
+        # En este caso, el `network_listener` se rompe si `is_connected` se vuelve `False`,
+        # por lo que un nuevo hilo es lo más seguro.
         if network_thread and network_thread.is_alive():
-            # Si el hilo ya está corriendo y se reconecta, no es necesario crear uno nuevo,
-            # pero dado cómo se rompe el bucle en network_listener, es mejor reemplazarlo.
-            # Podríamos añadir un flag al hilo para que se detenga si es el caso.
-            pass # Para simplificar, asumimos que el hilo anterior ya murió o está muriendo
+            # Considerar una forma más robusta de detener el hilo antiguo si es necesario.
+            # Por simplicidad, se asumirá que terminará pronto tras cambiar is_connected a False.
+            pass
         
         network_thread = threading.Thread(target=network_listener, args=(client_socket,))
         network_thread.daemon = True
@@ -444,14 +450,14 @@ def simulate_disconnect_action():
 
 # --- Función Principal de Pygame ---
 
-def run_game():
+def run_game(initial_velocity=None, initial_cooldown=None, initial_direction=None):
     global is_connected, assigned_client_id, all_cars_status, client_colors, color_index, reconnect_attempts, reconnect_timer
 
-    direction_selected = DIRECTION_EAST_WEST
+    direction_selected = initial_direction if initial_direction else DIRECTION_EAST_WEST
     
     def set_direction(direction):
         nonlocal direction_selected
-        if not is_connected:
+        if not is_connected: # Solo permitir cambiar dirección si no está conectado
             if direction_selected != direction:
                 direction_selected = direction
                 print(f"Dirección seleccionada: {DIRECTION_LABELS.get(direction_selected)}")
@@ -466,10 +472,10 @@ def run_game():
     
     east_button = Button(WIDTH // 2 + 30, 150, button_width, button_height, DIRECTION_LABELS[DIRECTION_EAST_WEST], lambda: set_direction(DIRECTION_EAST_WEST), BLUE)
     west_button = Button(WIDTH // 2 + 30 + button_width + 10, 150, button_width, button_height, DIRECTION_LABELS[DIRECTION_WEST_EAST], lambda: set_direction(DIRECTION_WEST_EAST), BLUE)
-    set_direction(direction_selected)
+    set_direction(direction_selected) # Inicializa el color del botón de dirección seleccionada
 
-    velocity_input_box = InputBox(WIDTH // 2 + 30, 210, input_width, input_height, text='10', is_numeric=True)
-    tiempo_espera_input_box = InputBox(WIDTH // 2 + 30, 280, input_width, input_height, text='5', is_numeric=True)
+    velocity_input_box = InputBox(WIDTH // 2 + 30, 210, input_width, input_height, text=str(initial_velocity) if initial_velocity is not None else '10', is_numeric=True)
+    tiempo_espera_input_box = InputBox(WIDTH // 2 + 30, 280, input_width, input_height, text=str(initial_cooldown) if initial_cooldown is not None else '5', is_numeric=True)
     
     input_boxes = [velocity_input_box, tiempo_espera_input_box]
 
@@ -482,6 +488,14 @@ def run_game():
     terminate_connection_button = Button(WIDTH - 180, 20, 160, 40, "Terminar Conexión", end_connection_action, RED)
     simulate_drop_button = Button(WIDTH - 180, 70, 160, 40, "Simular Caída", simulate_disconnect_action, DARK_GRAY)
 
+    # Deshabilitar botones de control inicialmente si la conexión es automática
+    if initial_velocity is not None and initial_cooldown is not None and initial_direction is not None:
+        enter_bridge_button.set_enabled(False)
+        east_button.set_enabled(False)
+        west_button.set_enabled(False)
+        velocity_input_box.set_enabled(False)
+        tiempo_espera_input_box.set_enabled(False)
+
     change_properties_button.set_enabled(False)
     terminate_connection_button.set_enabled(False)
     simulate_drop_button.set_enabled(False)
@@ -492,6 +506,22 @@ def run_game():
     connection_status_message = "" # Mensaje a mostrar al usuario
     last_update_time = pygame.time.get_ticks() # Para control del timer de reconexión
 
+    # Conexión automática si se pasaron argumentos
+    if initial_velocity is not None and initial_cooldown is not None and initial_direction is not None:
+        print("[*] Argumentos de inicio detectados. Intentando conexión automática...")
+        if attempt_connection(velocity_input_box, tiempo_espera_input_box, direction_selected, is_reconnecting=False):
+            print("[*] Conexión inicial automática exitosa.")
+            connection_status_message = "Conectado automáticamente."
+        else:
+            print("[!] Fallo la conexión inicial automática. Operando en modo manual.")
+            connection_status_message = "Desconectado (Fallo conexión automática)."
+            # Habilitar los controles manuales si la conexión automática falla
+            enter_bridge_button.set_enabled(True)
+            east_button.set_enabled(True)
+            west_button.set_enabled(True)
+            velocity_input_box.set_enabled(True)
+            tiempo_espera_input_box.set_enabled(True)
+
     while running:
         dt = (pygame.time.get_ticks() - last_update_time) / 1000.0 # Delta time en segundos
         last_update_time = pygame.time.get_ticks()
@@ -500,27 +530,28 @@ def run_game():
             if event.type == pygame.QUIT:
                 running = False
             
+            # Manejo de clics de ratón para input boxes y botones
             if event.type == pygame.MOUSEBUTTONDOWN:
+                if not is_connected: # Solo si no está conectado, para los botones de entrada
+                    enter_bridge_button.handle_event(event)
+                    east_button.handle_event(event)
+                    west_button.handle_event(event)
+                else: # Si está conectado, para los botones de control de propiedades/conexión
+                    change_properties_button.handle_event(event)
+                    terminate_connection_button.handle_event(event)
+                    simulate_drop_button.handle_event(event)
+
+                # Siempre manejar las cajas de texto, sin importar el estado de conexión
                 for box in input_boxes:
-                    box.active = False
-                    box.color = DARK_GRAY
-                for box in input_boxes:
-                    if box.rect.collidepoint(event.pos) and box.enabled:
+                    if box.rect.collidepoint(event.pos):
                         box.active = True
-                        box.color = ACTIVE_COLOR
-                        break
+                    else:
+                        box.active = False
+                    box.color = ACTIVE_COLOR if box.active else DARK_GRAY
             
+            # Manejar eventos de teclado para input boxes
             for box in input_boxes:
                 box.handle_event(event)
-
-            if is_connected:
-                change_properties_button.handle_event(event)
-                terminate_connection_button.handle_event(event)
-                simulate_drop_button.handle_event(event)
-            else:
-                enter_bridge_button.handle_event(event)
-                east_button.handle_event(event)
-                west_button.handle_event(event)
 
         # --- Lógica de reconexión automática ---
         if not is_connected and assigned_client_id != "" and reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
@@ -548,6 +579,7 @@ def run_game():
         if is_connected:
             east_button.set_enabled(False)
             west_button.set_enabled(False)
+            # Asegurarse de que el color de los botones de dirección se restablezca
             east_button.set_base_color(BLUE)
             west_button.set_base_color(BLUE)
 
@@ -561,7 +593,7 @@ def run_game():
         else:
             east_button.set_enabled(True)
             west_button.set_enabled(True)
-            set_direction(direction_selected)
+            set_direction(direction_selected) # Re-aplicar estado visual para los botones de dirección
 
             velocity_input_box.set_enabled(True)
             tiempo_espera_input_box.set_enabled(True)
@@ -608,19 +640,21 @@ def run_game():
 
                     car_draw_x = 0
                     if car_direction == DIRECTION_WEST_EAST:
+                        # De Oeste a Este, va de 0 a LENGTH_BRIDGE
                         car_draw_x = bridge_start_x + int((car_pos_logical / LENGTH_BRIDGE) * bridge_length_pixels)
                     elif car_direction == DIRECTION_EAST_WEST:
+                        # De Este a Oeste, va de LENGTH_BRIDGE a 0 (visual en la pantalla)
                         car_draw_x = bridge_start_x + bridge_length_pixels - int((car_pos_logical / LENGTH_BRIDGE) * bridge_length_pixels)
                     
                     pygame.draw.rect(SCREEN, car_color, (car_draw_x, car_draw_y, car_width, 30))
                     
-                    active_crossing_car = car_data
-                    pygame.draw.rect(SCREEN, BLACK, (car_draw_x, car_draw_y, car_width, 30), 2)
+                    active_crossing_car = car_data # Esto solo tomará el último coche en la iteración si hay varios cruzando
+                    pygame.draw.rect(SCREEN, BLACK, (car_draw_x, car_draw_y, car_width, 30), 2) # Borde negro para el coche activo
 
 
         # Mostrar información del coche que está cruzando
         current_car_info_y = 50
-        if active_crossing_car:
+        if active_crossing_car and active_crossing_car['state'] == CAR_STATE_CROSSING:
             crossing_car_text1 = HIGHLIGHT_FONT.render(f"Coche Cruzando: {active_crossing_car['clientId']}", True, BLACK)
             SCREEN.blit(crossing_car_text1, (50, current_car_info_y))
 
@@ -660,14 +694,14 @@ def run_game():
         SCREEN.blit(cooldown_label, (WIDTH // 2 + 30, 260))
         tiempo_espera_input_box.draw(SCREEN)
 
+        # Los botones de control se dibujan según el estado de conexión
         if is_connected:
             change_properties_button.draw(SCREEN)
             terminate_connection_button.draw(SCREEN)
             simulate_drop_button.draw(SCREEN)
         else:
             enter_bridge_button.draw(SCREEN)
-            set_direction(direction_selected) # Re-apply visual state for direction buttons
-
+            # Los botones de dirección ya se dibujan antes de este 'else' y su estado se maneja con set_enabled
 
         pygame.display.flip()
         clock.tick(60)
@@ -684,6 +718,7 @@ def run_game():
     
     if network_thread and network_thread.is_alive():
         print("[*] Esperando a que el hilo de red finalice...")
+        # Darle tiempo al hilo para terminar. Un timeout es importante para no bloquear indefinidamente.
         network_thread.join(timeout=1.0) 
         if network_thread.is_alive():
             print("[!] El hilo de red no terminó limpiamente.")
@@ -692,4 +727,30 @@ def run_game():
     sys.exit()
 
 if __name__ == "__main__":
-    run_game()
+    initial_vel = None
+    initial_cooldown = None
+    initial_dir = None
+
+    # sys.argv[0] es el nombre del script
+    # Esperamos 3 argumentos adicionales: velocidad, tiempo_de_espera, direccion
+    if len(sys.argv) == 4:
+        try:
+            initial_vel = int(sys.argv[1])
+            initial_cooldown = int(sys.argv[2])
+            initial_dir_str = sys.argv[3].upper() # Convertir a mayúsculas para comparar
+
+            if initial_dir_str == "EAST_TO_WEST":
+                initial_dir = DIRECTION_EAST_WEST
+            elif initial_dir_str == "WEST_TO_EAST":
+                initial_dir = DIRECTION_WEST_EAST
+            else:
+                raise ValueError("Dirección inválida. Use 'EAST_TO_WEST' o 'WEST_TO_EAST'.")
+
+            print(f"[*] Parámetros de inicio por línea de comandos: Velocidad={initial_vel}, TiempoEspera={initial_cooldown}, Dirección={initial_dir}")
+        except ValueError as e:
+            print(f"[!] Error en los argumentos de línea de comandos: {e}")
+            print("Uso: python cliente.py <velocidad> <tiempo_espera> <direccion>")
+            print("Ejemplo: python cliente.py 15 7 EAST_TO_WEST")
+            sys.exit(1) # Salir si hay un error en los argumentos
+
+    run_game(initial_vel, initial_cooldown, initial_dir)
