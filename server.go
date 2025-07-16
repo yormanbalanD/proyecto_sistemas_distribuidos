@@ -11,21 +11,17 @@ import (
 )
 
 const (
-	LENGTH_BRIDGE             = 300
-	MSG_CAR_STATUS            = "CAR_STATUS"
-	MSG_CAR_END               = "CAR_END"
-	MSG_CAR_START             = "CAR_START"
-	MSG_CONNECTED             = "CONNECTED"
-	MSG_REQUEST_BRIDGE_ACCESS = "REQUEST_BRIDGE_ACCESS"
+	LENGTH_BRIDGE  = 300
+	MSG_CAR_STATUS = "CAR_STATUS"
+	MSG_CAR_END    = "CAR_END"
+	MSG_CAR_START  = "CAR_START"
+	MSG_CONNECTED  = "CONNECTED"
 
 	MSG_CHANGE_CAR_PROPERTIES     = "CHANGE_CAR_PROPERTIES"
 	MSG_CHANGE_CAR_PROPERTIES_ACK = "CHANGE_CAR_PROPERTIES_ACK"
 
 	MSG_END_CONNECTION = "END_CONNECTION"
 
-	MSG_RECONNECT = "RECONNECT"
-
-	MSG_LEAVE_BRIDGE    = "LEAVE_BRIDGE"
 	DIRECTION_NONE      = "NONE"
 	DIRECTION_EAST_WEST = "EAST_TO_WEST"
 	DIRECTION_WEST_EAST = "WEST_TO_EAST"
@@ -87,6 +83,8 @@ func (q *CarQueue) RemoveCarByID(clientID string) (*Car, bool) {
 var EastToWestQueue CarQueue
 var WestToEastQueue CarQueue
 
+// Estructuras de mensajes enviados desde el servidor al cliente y viceversa
+
 type MensajeStatusToClient struct {
 	Tipo     string `json:"tipo"`
 	ClientID string `json:"clientId"`
@@ -110,21 +108,6 @@ type MessageToServer struct {
 	Tipo string `json:"type"`
 }
 
-type Car struct {
-	ClientID              string
-	Position              int
-	Direction             string
-	IsCrossing            bool
-	State                 string // WAITING, CROSSING, COOLDOWN
-	dec                   *json.Decoder
-	enc                   *json.Encoder
-	Velocity              int
-	TiempoDeEspera        int
-	conn                  net.Conn
-	lastTimeConectionLost time.Time
-	conectionLost         bool
-}
-
 type InicializacionCliente struct {
 	Direction      string `json:"direction"`
 	Velocity       int    `json:"velocity"`
@@ -140,6 +123,23 @@ type MensajeInicializacionToClient struct {
 	TiempoDeEspera int    `json:"tiempoDeEspera"`
 }
 
+// Estructura de datos usada para almacenar los clientes en el servidor
+type Car struct {
+	ClientID              string
+	Position              int
+	Direction             string
+	IsCrossing            bool
+	State                 string // WAITING, CROSSING, COOLDOWN
+	dec                   *json.Decoder
+	enc                   *json.Encoder
+	Velocity              int
+	TiempoDeEspera        int
+	conn                  net.Conn
+	lastTimeConectionLost time.Time
+	conectionLost         bool
+}
+
+// Tabla de clientes conectados al servidor
 var tablaClientes = make(map[string]*Car)
 var client_id_counter = 0
 
@@ -147,6 +147,7 @@ var current_car *Car
 var is_occupied bool
 var current_direction string
 
+// Termina la conexión del cliente
 func terminarConexion(car *Car) {
 	fmt.Printf("El cliente %s ha finalizado la conexión.\n", car.ClientID)
 	car.conn.Close()
@@ -155,6 +156,7 @@ func terminarConexion(car *Car) {
 	delete(tablaClientes, car.ClientID)
 }
 
+// Maneja la conexión del cliente con el servidor
 func handleConnection(car *Car) {
 	enc := car.enc
 	dec := car.dec
@@ -195,6 +197,7 @@ func handleConnection(car *Car) {
 	}
 }
 
+// Guarda un cliente en la tabla de clientes y inicializa sus atributos
 func conectarCliente(conn net.Conn) (*Car, error) {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
@@ -545,6 +548,7 @@ func main() {
 	current_direction = DIRECTION_NONE
 	is_occupied = false
 
+	// Inicia el servidor
 	server, err := net.Listen("tcp", ":"+strconv.Itoa(SERVER_PORT))
 	if err != nil {
 		panic(err)
@@ -553,6 +557,7 @@ func main() {
 	println("Servidor escuchando en:", server.Addr().String())
 
 	println("Iniciando el manejo del puente...")
+	// Comienza el manejo del puente
 	go manejoDelPuente()
 	go crearClientesAleatorios(2)
 
@@ -575,15 +580,14 @@ func main() {
 	}
 }
 
+// Crea minNumClientes a (minNumClientes + 10) clientes aleatorios
 func crearClientesAleatorios(minNumClientes int) {
-	time.Sleep(time.Second * 1)
-
 	rand.Seed(time.Now().UnixNano())
 
 	// Se generara entre min a (min + 10) clientes de forma aleatoria
 	numeroDeClientes := rand.Intn(10) + minNumClientes
 
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 3)
 	fmt.Printf("Generando %d clientes...\n", numeroDeClientes)
 
 	for i := 0; i < numeroDeClientes; i++ {

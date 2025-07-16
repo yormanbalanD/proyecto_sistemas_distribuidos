@@ -66,9 +66,23 @@ all_cars_status = {} # Diccionario para almacenar el estado de TODOS los coches
 car_status_lock = threading.Lock() # Para proteger all_cars_status de accesos concurrentes
 
 client_colors = {}
+# Lista de 15 colores predefinidos para los coches
 PREDEFINED_COLORS = [
-    (255, 99, 71), (60, 179, 113), (255, 215, 0), (138, 43, 226), (0, 191, 255),
-    (255, 165, 0), (218, 112, 214), (0, 128, 0), (128, 0, 0), (70, 130, 180)
+    (255, 99, 71),    # Tomato
+    (60, 179, 113),   # MediumSeaGreen
+    (255, 215, 0),    # Gold
+    (138, 43, 226),   # BlueViolet
+    (0, 191, 255),    # DeepSkyBlue
+    (255, 165, 0),    # Orange
+    (218, 112, 214),  # Orchid
+    (0, 128, 0),      # Green
+    (128, 0, 0),      # Maroon
+    (70, 130, 180),   # SteelBlue
+    (255, 20, 147),   # DeepPink
+    (0, 255, 255),    # Cyan
+    (255, 140, 0),    # DarkOrange
+    (124, 252, 0),    # LawnGreen
+    (75, 0, 130)      # Indigo
 ]
 color_index = 0 # Reiniciamos el índice de color para que los colores se reutilicen de forma circular
 
@@ -88,7 +102,7 @@ DIRECTION_LABELS = {
 def get_unique_color(client_id):
     global color_index
     if client_id not in client_colors:
-        # Asigna un color de la lista predefinida o uno aleatorio si se acaban
+        # Asigna un color de la lista predefinida de forma circular
         client_colors[client_id] = PREDEFINED_COLORS[color_index % len(PREDEFINED_COLORS)]
         color_index += 1
     return client_colors[client_id]
